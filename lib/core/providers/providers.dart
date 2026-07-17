@@ -154,6 +154,22 @@ class DeckOperations {
     _ref.invalidate(deckListProvider);
   }
 
+  /// 删除单道题目
+  Future<void> deleteQuestion(String questionId, String deckId) async {
+    final db = _ref.read(databaseProvider);
+    await db.deleteQuestion(questionId);
+    // 更新题包的题目数量
+    final deck = await db.getDeck(deckId);
+    if (deck != null) {
+      await db.updateDeck(deck.copyWith(
+        questionCount: deck.questionCount - 1,
+        updatedAt: DateTime.now(),
+      ));
+    }
+    _ref.invalidate(deckListProvider);
+    _ref.invalidate(questionsByDeckProvider(deckId));
+  }
+
   /// 更新题包掌握度
   Future<void> updateMastery(String deckId, int masteryLevel) async {
     final db = _ref.read(databaseProvider);
@@ -245,6 +261,12 @@ class RandomLevelNotifier extends StateNotifier<int> {
 final allQuestionsProvider = FutureProvider<List<Question>>((ref) async {
   final db = ref.read(databaseProvider);
   return db.getAllQuestions();
+});
+
+/// 某个题包的题目列表
+final questionsByDeckProvider = FutureProvider.family<List<Question>, String>((ref, deckId) async {
+  final db = ref.read(databaseProvider);
+  return db.getQuestionsByDeck(deckId);
 });
 
 // ============ 月度打卡 & 答题统计 ============

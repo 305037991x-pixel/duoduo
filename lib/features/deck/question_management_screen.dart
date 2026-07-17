@@ -5,172 +5,141 @@ import '../../core/constants/app_colors.dart';
 import '../../core/providers/providers.dart';
 import '../../data/models/question.dart';
 import '../../data/models/question_type.dart';
-import '../../services/content_analyzer.dart';
-import '../../shared/widgets/duo_button.dart';
 
-/// 题目预览页 — AI 生成后让用户预览，确认后保存
-class DeckPreviewScreen extends ConsumerStatefulWidget {
-  final AnalysisResult result;
-  final String? sourceText;
-  final String? sourceImage;
+/// 题目管理页 — 查看题包中的所有题目，可删除单道题
+class QuestionManagementScreen extends ConsumerWidget {
+  final String deckId;
+  final String deckTitle;
 
-  const DeckPreviewScreen({
+  const QuestionManagementScreen({
     super.key,
-    required this.result,
-    this.sourceText,
-    this.sourceImage,
+    required this.deckId,
+    required this.deckTitle,
   });
 
   @override
-  ConsumerState<DeckPreviewScreen> createState() => _DeckPreviewScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final questionsAsync = ref.watch(questionsByDeckProvider(deckId));
 
-class _DeckPreviewScreenState extends ConsumerState<DeckPreviewScreen> {
-  bool _isSaving = false;
-  late List<Question> _questions;
-
-  @override
-  void initState() {
-    super.initState();
-    _questions = List.from(widget.result.questions);
-  }
-
-  void _removeQuestion(int index) {
-    setState(() {
-      _questions.removeAt(index);
-    });
-  }
-
-  Future<void> _save() async {
-    if (_questions.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('题目列表为空，无法保存')),
-      );
-      return;
-    }
-    setState(() => _isSaving = true);
-    try {
-      // 用用户编辑后的题目列表替换原始结果
-      final editedResult = AnalysisResult(
-        title: widget.result.title,
-        questions: _questions,
-      );
-      await ref.read(deckOperationsProvider).saveAnalysisResult(
-            editedResult,
-            sourceText: widget.sourceText,
-            sourceImage: widget.sourceImage,
-          );
-      if (mounted) {
-        // 提示保存成功，返回首页
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('题包已保存'),
-            backgroundColor: AppColors.green,
-            duration: Duration(seconds: 1),
-          ),
-        );
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存失败: $e')),
-        );
-        setState(() => _isSaving = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('题目预览'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        title: Text(deckTitle),
       ),
-      body: Column(
-        children: [
-          // 题包标题
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            color: AppColors.greenLight,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        child: questionsAsync.when(
+          data: (questions) {
+            if (questions.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.quiz_outlined, size: 64, color: AppColors.textLight),
+                    const SizedBox(height: 16),
+                    const Text(
+                      '暂无题目',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return Column(
               children: [
-                Text(
-                  widget.result.title,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.greenDark,
+                // 标题栏
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  color: AppColors.blueLight,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.edit, color: AppColors.blue, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        '共 ${questions.length} 道题',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.blueDark,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'AI 已生成 ${_questions.length} 道题，预览确认后保存',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w600,
+                // 题目列表
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: questions.length,
+                    itemBuilder: (context, index) {
+                      return _QuestionManageCard(
+                        question: questions[index],
+                        index: index + 1,
+                        onDelete: () async {
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('删除题目'),
+                              content: const Text('确定删除这道题吗？此操作不可撤销。'),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('取消'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  style: TextButton.styleFrom(foregroundColor: AppColors.red),
+                                  child: const Text('删除'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmed == true) {
+                            await ref.read(deckOperationsProvider).deleteQuestion(
+                                  questions[index].id,
+                                  deckId,
+                                );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('题目已删除'),
+                                  duration: Duration(seconds: 1),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                      ).animate().fadeIn(
+                            duration: 200.ms,
+                            delay: (index * 50).ms,
+                          );
+                    },
                   ),
                 ),
               ],
-            ),
+            );
+          },
+          loading: () => const Center(
+            child: CircularProgressIndicator(color: AppColors.green),
           ),
-          // 题目列表
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _questions.length,
-              itemBuilder: (context, index) {
-                return _QuestionPreviewCard(
-                  question: _questions[index],
-                  index: index + 1,
-                  onDelete: () => _removeQuestion(index),
-                ).animate().fadeIn(
-                      duration: 200.ms,
-                      delay: (index * 50).ms,
-                    );
-              },
-            ),
-          ),
-          // 保存按钮
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: AppColors.border, width: 2)),
-            ),
-            child: SafeArea(
-              child: DuoButton(
-                label: _isSaving ? '保存中...' : '保存题包',
-                color: AppColors.green,
-                width: double.infinity,
-                height: 56,
-                icon: Icons.check,
-                fontSize: 18,
-                enabled: !_isSaving,
-                onPressed: _save,
-              ),
-            ),
-          ),
-        ],
+          error: (err, _) => Center(child: Text('加载失败: $err')),
+        ),
       ),
     );
   }
 }
 
-/// 单题预览卡片
-class _QuestionPreviewCard extends StatelessWidget {
+/// 题目管理卡片（可删除）
+class _QuestionManageCard extends StatelessWidget {
   final Question question;
   final int index;
   final VoidCallback onDelete;
 
-  const _QuestionPreviewCard({
+  const _QuestionManageCard({
     required this.question,
     required this.index,
     required this.onDelete,
@@ -227,32 +196,8 @@ class _QuestionPreviewCard extends StatelessWidget {
                 ),
               ),
               const Spacer(),
-              // 删除按钮
               GestureDetector(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text('删除题目'),
-                      content: const Text('确定删除这道题吗？'),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('取消'),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            onDelete();
-                          },
-                          style: TextButton.styleFrom(foregroundColor: AppColors.red),
-                          child: const Text('删除'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                onTap: onDelete,
                 child: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(

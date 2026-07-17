@@ -6,6 +6,7 @@ import '../../data/models/deck.dart';
 import '../../shared/widgets/stats_widgets.dart';
 import '../learning/quiz_screen.dart';
 import '../ingestion/ingestion_screen.dart';
+import 'question_management_screen.dart';
 
 class DeckListScreen extends ConsumerStatefulWidget {
   const DeckListScreen({super.key});
@@ -72,6 +73,16 @@ class _DeckListScreenState extends ConsumerState<DeckListScreen> {
                         );
                       },
                       onDelete: () => _confirmDelete(context, filtered[index]),
+                      onManage: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => QuestionManagementScreen(
+                              deckId: filtered[index].id,
+                              deckTitle: filtered[index].title,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   );
                 },
@@ -152,11 +163,13 @@ class _DeckCard extends StatelessWidget {
   final Deck deck;
   final VoidCallback onStudy;
   final VoidCallback onDelete;
+  final VoidCallback onManage;
 
   const _DeckCard({
     required this.deck,
     required this.onStudy,
     required this.onDelete,
+    required this.onManage,
   });
 
   @override
@@ -226,15 +239,26 @@ class _DeckCard extends StatelessWidget {
                 icon: const Icon(Icons.more_vert, color: AppColors.textLight),
                 onSelected: (value) {
                   if (value == 'delete') onDelete();
+                  if (value == 'manage') onManage();
                 },
                 itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: 'manage',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit, color: AppColors.blue, size: 20),
+                        SizedBox(width: 8),
+                        Text('管理题目'),
+                      ],
+                    ),
+                  ),
                   const PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [
                         Icon(Icons.delete, color: AppColors.red, size: 20),
                         SizedBox(width: 8),
-                        Text('删除'),
+                        Text('删除题包'),
                       ],
                     ),
                   ),

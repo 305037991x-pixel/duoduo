@@ -158,6 +158,12 @@ class DatabaseHelper {
     return maps.map(Question.fromMap).toList();
   }
 
+  /// 删除单道题目
+  Future<void> deleteQuestion(String questionId) async {
+    final db = await database;
+    await db.delete('questions', where: 'id = ?', whereArgs: [questionId]);
+  }
+
   // ============ 随机抽题 ============
 
   /// 获取所有题目（跨题包）
