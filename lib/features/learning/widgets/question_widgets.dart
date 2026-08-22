@@ -717,11 +717,114 @@ class _OrderingWidgetState extends State<OrderingWidget> {
   }
 }
 
+/// 问答题 Widget（开放作答，AI对错+点评）
+class EssayWidget extends StatefulWidget {
+  final Question question;
+  final bool showResult;
+  final bool isCorrect;
+  final String? feedback;
+  final ValueChanged<String> onAnswerChanged;
+
+  const EssayWidget({
+    super.key,
+    required this.question,
+    this.showResult = false,
+    this.isCorrect = false,
+    this.feedback,
+    required this.onAnswerChanged,
+  });
+
+  @override
+  State<EssayWidget> createState() => _EssayWidgetState();
+}
+
+class _EssayWidgetState extends State<EssayWidget> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _controller,
+          enabled: !widget.showResult,
+          onChanged: widget.onAnswerChanged,
+          maxLines: 6,
+          minLines: 3,
+          decoration: InputDecoration(
+            hintText: '在此输入你的回答...',
+            hintStyle: const TextStyle(color: AppColors.textLight),
+            filled: true,
+            fillColor: widget.showResult
+                ? (widget.isCorrect ? AppColors.greenLight : AppColors.redLight)
+                : AppColors.surface,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.blue, width: 2),
+            ),
+          ),
+        ),
+        if (widget.showResult) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: widget.isCorrect ? AppColors.greenLight : AppColors.redLight,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: widget.isCorrect ? AppColors.green : AppColors.red, width: 1.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(widget.isCorrect ? Icons.check_circle : Icons.cancel, color: widget.isCorrect ? AppColors.green : AppColors.red, size: 20),
+                    const SizedBox(width: 8),
+                    Text(widget.isCorrect ? '回答正确' : '再接再厉',
+                        style: TextStyle(fontWeight: FontWeight.w800, color: widget.isCorrect ? AppColors.greenDark : AppColors.redDark)),
+                  ],
+                ),
+                if (widget.feedback != null && widget.feedback!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(widget.feedback!, style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary)),
+                ],
+                const SizedBox(height: 8),
+                Container(height: 1, color: AppColors.border),
+                const SizedBox(height: 8),
+                const Text('参考答案：', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                const SizedBox(height: 4),
+                Text(widget.question.answer, style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary)),
+                if (widget.question.explanation != null && widget.question.explanation!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text('解析：${widget.question.explanation}', style: const TextStyle(fontSize: 12, height: 1.5, color: AppColors.textSecondary)),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// 根据题型渲染对应 Widget
 class QuestionWidget extends StatelessWidget {
   final Question question;
   final bool showResult;
   final String? selectedAnswer;
+  final bool isCorrect;
+  final String? feedback;
   final ValueChanged<String> onAnswerSelected;
 
   const QuestionWidget({
@@ -730,6 +833,8 @@ class QuestionWidget extends StatelessWidget {
     this.showResult = false,
     this.selectedAnswer,
     required this.onAnswerSelected,
+    this.isCorrect = false,
+    this.feedback,
   });
 
   @override
@@ -771,6 +876,14 @@ class QuestionWidget extends StatelessWidget {
           onOrderChanged: (items) {
             onAnswerSelected(items.join('|'));
           },
+        );
+      case QuestionType.essay:
+        return EssayWidget(
+          question: question,
+          showResult: showResult,
+          isCorrect: isCorrect,
+          feedback: feedback,
+          onAnswerChanged: onAnswerSelected,
         );
     }
   }

@@ -4,7 +4,8 @@ enum QuestionType {
   fillBlank('fill_blank', '填空题'),
   trueFalse('true_false', '判断题'),
   matching('matching', '匹配题'),
-  ordering('ordering', '排序题');
+  ordering('ordering', '排序题'),
+  essay('essay', '问答题');
 
   final String value;
   final String label;

@@ -418,6 +418,18 @@ class _QuestionPreviewCard extends StatelessWidget {
               );
             }),
           ],
+          // 问答题
+          if (question.type == QuestionType.essay) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.greenLight, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppColors.green, width: 1.5)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Row(children: [Icon(Icons.question_answer, size: 16, color: AppColors.green), SizedBox(width: 6), Text('问答题 · 参考答案', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.green))]),
+                const SizedBox(height: 6),
+                Text(question.answer, style: const TextStyle(fontSize: 14, height: 1.5, color: AppColors.textPrimary)),
+              ]),
+            ),
+          ],
           // 解析
           if (question.explanation != null) ...[
             const SizedBox(height: 8),

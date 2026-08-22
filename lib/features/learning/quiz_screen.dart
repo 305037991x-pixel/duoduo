@@ -33,6 +33,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
   int _xpGained = 0;
   bool _isChecking = false; // AI 判题中
   bool _isCorrectAnswer = false; // 缓存的判题结果
+  String? _essayFeedback; // 问答题点评
 
   @override
   void initState() {
@@ -62,33 +63,59 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
   }
 
   Future<void> _checkAnswer() async {
-    if (_selectedAnswer == null) return;
+    if (_selectedAnswer == null || _selectedAnswer!.trim().isEmpty) return;
 
     final question = _questions[_currentIndex];
 
-    // 先做本地判断
-    var isCorrect = _checkCorrect(question, _selectedAnswer!);
-
-    // 填空题本地不匹配时，调用 AI 判断语义是否等价
-    if (!isCorrect && question.type == QuestionType.fillBlank) {
+    // 问答题：AI 对错+点评
+    if (question.type == QuestionType.essay) {
       setState(() => _isChecking = true);
       try {
         final aiService = ref.read(openaiServiceProvider);
         final hasKey = await aiService.hasApiKey();
         if (hasKey) {
-          isCorrect = await aiService.judgeFillBlankAnswer(
+          final result = await aiService.judgeEssayAnswer(
             question: question.content,
             userAnswer: _selectedAnswer!,
-            correctAnswer: question.answer,
+            referenceAnswer: question.answer,
           );
+          _isCorrectAnswer = result['correct'] as bool;
+          _essayFeedback = result['feedback'] as String?;
+        } else {
+          // 无key时本地简单包含判断
+          _isCorrectAnswer = _selectedAnswer!.trim().length >= 10;
+          _essayFeedback = '未配置AI，答案已记录，请对照参考答案自评。';
         }
       } catch (_) {
-        // AI 判题失败，保持本地判断结果
+        _isCorrectAnswer = false;
+        _essayFeedback = 'AI判分暂不可用，请对照参考答案自评。';
       }
       setState(() => _isChecking = false);
-    }
+    } else {
+      // 先做本地判断
+      var isCorrect = _checkCorrect(question, _selectedAnswer!);
 
-    _isCorrectAnswer = isCorrect;
+      // 填空题本地不匹配时，调用 AI 判断语义是否等价
+      if (!isCorrect && question.type == QuestionType.fillBlank) {
+        setState(() => _isChecking = true);
+        try {
+          final aiService = ref.read(openaiServiceProvider);
+          final hasKey = await aiService.hasApiKey();
+          if (hasKey) {
+            isCorrect = await aiService.judgeFillBlankAnswer(
+              question: question.content,
+              userAnswer: _selectedAnswer!,
+              correctAnswer: question.answer,
+            );
+          }
+        } catch (_) {
+          // AI 判题失败，保持本地判断结果
+        }
+        setState(() => _isChecking = false);
+      }
+
+      _isCorrectAnswer = isCorrect;
+    }
 
     // 记录每日打卡
     final gameService = ref.read(gamificationServiceProvider);
@@ -123,14 +150,13 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
       case QuestionType.trueFalse:
         return answer.trim() == question.answer.trim();
       case QuestionType.fillBlank:
-        // 去除空格和标点，忽略大小写
         return answer.trim().toLowerCase() == question.answer.trim().toLowerCase();
       case QuestionType.matching:
       case QuestionType.ordering:
-        // 对于匹配和排序，答案格式为 "item1-match1|item2-match2" 或 "step1|step2|step3"
-        // 比较时需要规范化
         final normalize = (String s) => s.split('|').map((e) => e.trim()).join('|');
         return normalize(answer) == normalize(question.answer);
+      case QuestionType.essay:
+        return false; // 问答题走AI判分，不进本地
     }
   }
 
@@ -142,6 +168,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
         _showResult = false;
         _isCorrectAnswer = false;
         _isChecking = false;
+        _essayFeedback = null;
       });
     } else {
       // 完成
@@ -319,12 +346,14 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                       question: question,
                       showResult: _showResult,
                       selectedAnswer: _selectedAnswer,
+                      isCorrect: _isCorrectAnswer,
+                      feedback: _essayFeedback,
                       onAnswerSelected: (answer) {
                         setState(() => _selectedAnswer = answer);
                       },
                     ),
-                    // 解析
-                    if (_showResult && question.explanation != null) ...[
+                    // 解析（问答题已在EssayWidget内展示点评，此处不重复）
+                    if (_showResult && question.type != QuestionType.essay && question.explanation != null) ...[
                       const SizedBox(height: 16),
                       Container(
                         padding: const EdgeInsets.all(16),
