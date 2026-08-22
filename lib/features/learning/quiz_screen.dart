@@ -121,6 +121,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     final gameService = ref.read(gamificationServiceProvider);
     await gameService.recordCheckIn();
 
+    final isCorrect = _isCorrectAnswer;
     if (isCorrect) {
       _correctCount++;
       _xpGained += 10;
