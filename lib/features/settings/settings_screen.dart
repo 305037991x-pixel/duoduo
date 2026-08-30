@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/providers/providers.dart';
@@ -704,33 +703,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       icon: Icons.qr_code_scanner,
                       fontSize: 15,
                       onPressed: _biliChecking ? null : _qrLogin,
-                    ),
-                    const SizedBox(height: 4),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: () async {
-                          final s = await ref.read(bilibiliServiceProvider).getSessdata();
-                          if (!mounted) return;
-                          if (s == null || s.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('尚未登录B站'), backgroundColor: AppColors.red),
-                            );
-                            return;
-                          }
-                          await Clipboard.setData(ClipboardData(text: s));
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('SESSDATA 已复制。注意：续期请只留给本App，其他软件建议只粘贴 SESSDATA 只读使用'),
-                                backgroundColor: AppColors.green,
-                              ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('复制 SESSDATA 给其他软件', style: TextStyle(fontSize: 12)),
-                      ),
                     ),
                     const SizedBox(height: 12),
                     Row(children: [
