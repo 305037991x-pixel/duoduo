@@ -17,14 +17,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: 解码发布签名密钥（固定签名，保证覆盖安装）
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/duoduo-release.jks
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.32.8'
-          channel: stable
+          channel: 'stable'
           cache: true
       - run: flutter pub get
       - run: flutter analyze
-      - run: flutter build apk --release
+      - name: Build APK（版本号随构建次数自动递增）
+        env:
+          KEYSTORE_FILE: /tmp/duoduo-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release --build-name=1.1.${{ github.run_number }} --build-number=${{ github.run_number }}
       - uses: actions/upload-artifact@v4
         with:
           name: app-release-apk

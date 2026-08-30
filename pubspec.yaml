@@ -1,7 +1,7 @@
 name: dlg_q
 description: "DIY 多邻国学习APP - 用户自定义题库 + AI拆题"
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+8
 
 environment:
   sdk: ^3.5.0
