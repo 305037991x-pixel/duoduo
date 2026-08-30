@@ -24,7 +24,7 @@ class DatabaseHelper {
     final path = join(dbPath, 'dlg_q.db');
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -98,42 +98,52 @@ class DatabaseHelper {
     'daily_goal': 50,
     'today_xp': 0,
   });
+
+  // v2 新增表（全新安装也要建，否则查询直接报错）
+  await _createV2Tables(db);
 }
+
+  /// v2/v3 新增表：B站字幕表 + 题目反馈表
+  /// 用 IF NOT EXISTS，升级与修复（如 v2 库缺表）都可安全重复执行
+  Future<void> _createV2Tables(Database db) async {
+    // B站字幕表（只存纯文本，不存时间轴）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS subtitles (
+        id TEXT PRIMARY KEY,
+        bvid TEXT NOT NULL,
+        cid INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        up_name TEXT,
+        page INTEGER DEFAULT 1,
+        lang TEXT,
+        lang_doc TEXT,
+        line_count INTEGER DEFAULT 0,
+        content TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+
+    // 题目反馈表（用于AI后台提炼并优化出题提示词）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS question_feedback (
+        id TEXT PRIMARY KEY,
+        question_id TEXT NOT NULL,
+        deck_id TEXT,
+        reason TEXT NOT NULL,
+        comment TEXT,
+        question_snapshot TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at INTEGER NOT NULL
+      )
+    ''');
+  }
 
   /// 版本迁移
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // B站字幕表（只存纯文本，不存时间轴）
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS subtitles (
-          id TEXT PRIMARY KEY,
-          bvid TEXT NOT NULL,
-          cid INTEGER NOT NULL,
-          title TEXT NOT NULL,
-          up_name TEXT,
-          page INTEGER DEFAULT 1,
-          lang TEXT,
-          lang_doc TEXT,
-          line_count INTEGER DEFAULT 0,
-          content TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        )
-      ''');
-
-      // 题目反馈表（用于AI后台提炼并优化出题提示词）
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS question_feedback (
-          id TEXT PRIMARY KEY,
-          question_id TEXT NOT NULL,
-          deck_id TEXT,
-          reason TEXT NOT NULL,
-          comment TEXT,
-          question_snapshot TEXT,
-          status TEXT DEFAULT 'pending',
-          created_at INTEGER NOT NULL
-        )
-      ''');
+    if (oldVersion < 3) {
+      // v3 是修复版本：早期 v2 全新安装漏建了这两张表，用 IF NOT EXISTS 自愈
+      await _createV2Tables(db);
     }
   }
 

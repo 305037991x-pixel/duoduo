@@ -49,42 +49,54 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final openai = ref.read(openaiServiceProvider);
-    final key = await openai.getApiKey();
-    final model = await openai.getModel();
-    final baseUrl = await openai.getBaseUrl();
-    final providerId = await openai.getProviderId();
-    final stats = await ref.read(gamificationServiceProvider).getStats();
+    try {
+      final openai = ref.read(openaiServiceProvider);
+      final key = await openai.getApiKey();
+      final model = await openai.getModel();
+      final baseUrl = await openai.getBaseUrl();
+      final providerId = await openai.getProviderId();
+      final stats = await ref.read(gamificationServiceProvider).getStats();
 
-    // B站登录态 + 反馈数据
-    final bili = ref.read(bilibiliServiceProvider);
-    final sessdata = await bili.getSessdata();
-    final feedback = ref.read(feedbackServiceProvider);
-    final pendingCount = await feedback.countPending();
-    final rules = await FeedbackService.getPromptRules();
+      // B站登录态 + 反馈数据
+      final bili = ref.read(bilibiliServiceProvider);
+      final sessdata = await bili.getSessdata();
+      final feedback = ref.read(feedbackServiceProvider);
+      final pendingCount = await feedback.countPending();
+      final rules = await FeedbackService.getPromptRules();
 
-    setState(() {
-      _apiKeyController.text = key ?? '';
-      _baseUrlController.text = baseUrl;
-      _selectedProviderId = providerId;
-      _dailyGoal = stats.dailyGoal;
-      _sessdataController.text = sessdata ?? '';
-      _pendingFeedbackCount = pendingCount;
-      _promptRules = rules;
+      if (!mounted) return;
+      setState(() {
+        _apiKeyController.text = key ?? '';
+        _baseUrlController.text = baseUrl;
+        _selectedProviderId = providerId;
+        _dailyGoal = stats.dailyGoal;
+        _sessdataController.text = sessdata ?? '';
+        _pendingFeedbackCount = pendingCount;
+        _promptRules = rules;
 
-      // 检查模型是否在当前厂商的预设列表中
-      final provider = AIProviders.getById(providerId);
-      if (provider != null && provider.models.contains(model)) {
-        _selectedModel = model;
-        _useCustomModel = false;
-      } else {
-        // 不在预设列表中，使用自定义模型
-        _useCustomModel = true;
-        _customModelController.text = model;
+        // 检查模型是否在当前厂商的预设列表中
+        final provider = AIProviders.getById(providerId);
+        if (provider != null && provider.models.contains(model)) {
+          _selectedModel = model;
+          _useCustomModel = false;
+        } else {
+          // 不在预设列表中，使用自定义模型
+          _useCustomModel = true;
+          _customModelController.text = model;
+        }
+
+        _isLoading = false;
+      });
+    } catch (e) {
+      // 加载失败也要进入界面，决不能卡在加载圈
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('部分设置加载失败：$e'),
+          backgroundColor: AppColors.red,
+        ));
       }
-
-      _isLoading = false;
-    });
+    }
   }
 
   /// 选择厂商时自动填充 base URL 和默认模型
