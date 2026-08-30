@@ -96,6 +96,7 @@ class _DeckListScreenState extends ConsumerState<DeckListScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: "deck_list_fab",
         onPressed: () {
           Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const IngestionScreen()),
