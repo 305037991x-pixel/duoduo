@@ -1,4 +1,10 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
+import 'package:pointycastle/api.dart' show PublicKeyParameter;
+import 'package:pointycastle/asymmetric/api.dart' show RSAPublicKey;
+import 'package:pointycastle/asymmetric/oaep.dart' show OAEPEncoding;
+import 'package:pointycastle/asymmetric/rsa.dart' show RSAEngine;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import '../data/database/database_helper.dart';
@@ -63,9 +69,21 @@ class BiliSubtitleResult {
 ///    扫一扫确认后，poll 响应的 Set-Cookie 里直接返回 SESSDATA，无需 WebView
 /// 2. 手动粘贴：浏览器登录 bilibili.com 后从 Cookie 复制 SESSDATA 到设置页
 ///
+/// 登录态有效期约1个月。扫码登录会保存 refresh_token，在拉字幕/验证前
+/// 调用 refreshCookieIfNeeded 自动续期（B站官方刷新流程），只要一个月内
+/// 用过一次就无需重新扫码；手动粘贴方式没有 refresh_token，到期需重扫。
+///
 /// B站的 AI 字幕接口必须携带 SESSDATA 才能返回。
 class BilibiliService {
   static const String _sessdataKey = 'bili_sessdata';
+  static const String _jctKey = 'bili_jct'; // csrf token
+  static const String _refreshTokenKey = 'bili_refresh_token';
+
+  /// B站 Web 端 cookie 刷新用的固定 RSA 公钥（JWK 格式，逆向自官方 wasm）
+  static const String _refreshPubKeyN =
+      'y4HdjgJHBlbaBN04VERG4qNBIFHP6a3GozCl75AihQloSWCXC5HDNgyinEnhaQ_4-gaMud_'
+      'GF50elYXLlCToR9se9Z8z433U3KjM-3Yx7ptKkmQNAMggQwAVKgq3zYAoidNEWuxpkY_m'
+      'AitTSRLnsJW-NCTa0bqBFF6Wm1MxgfE';
 
   final DatabaseHelper _db;
   final Dio _dio = Dio(BaseOptions(
@@ -77,11 +95,16 @@ class BilibiliService {
 
   Future<Map<String, String>> _headers({bool withCookie = true}) async {
     final sess = await getSessdata();
+    final jct = await _getJct();
+    final cookieParts = <String>[
+      if (sess != null && sess.isNotEmpty) 'SESSDATA=$sess',
+      if (jct != null && jct.isNotEmpty) 'bili_jct=$jct',
+    ];
     return {
       'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
       'Referer': 'https://www.bilibili.com/',
-      if (withCookie && sess != null && sess.isNotEmpty) 'Cookie': 'SESSDATA=$sess',
+      if (withCookie && cookieParts.isNotEmpty) 'Cookie': cookieParts.join('; '),
     };
   }
 
@@ -94,10 +117,28 @@ class BilibiliService {
     return _sessdata;
   }
 
-  Future<void> setSessdata(String value) async {
-    _sessdata = value.trim();
+  Future<String?> _getJct() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_jctKey);
+  }
+
+  Future<String?> _getRefreshToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_refreshTokenKey);
+  }
+
+  Future<void> _saveCredentials({required String sessdata, String? jct, String? refreshToken}) async {
+    _sessdata = sessdata.trim();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_sessdataKey, _sessdata!);
+    if (jct != null && jct.isNotEmpty) await prefs.setString(_jctKey, jct);
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      await prefs.setString(_refreshTokenKey, refreshToken);
+    }
+  }
+
+  Future<void> setSessdata(String value) async {
+    await _saveCredentials(sessdata: value);
   }
 
   Future<bool> hasLogin() async {
@@ -121,7 +162,8 @@ class BilibiliService {
     return BiliQrCode(qrcodeKey: d['qrcode_key'].toString(), qrUrl: d['url'].toString());
   }
 
-  /// 轮询扫码状态。登录成功时 SESSDATA 在 Set-Cookie 响应头中（data.url 参数里也有一份），自动保存。
+  /// 轮询扫码状态。登录成功时新 cookie 在 Set-Cookie 响应头中（data.url 参数里也有一份），
+  /// refresh_token 在 JSON data 中；三者一并保存，供后续自动续期使用。
   Future<BiliQrPollState> pollQrLogin(String qrcodeKey) async {
     final resp = await _dio.get(
       'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
@@ -139,21 +181,28 @@ class BilibiliService {
     }
 
     // 登录成功：优先从 Set-Cookie 头提取，其次从 data.url 的查询参数提取
-    String? sessdata = _extractFromSetCookie(resp.headers.map['set-cookie']);
-    sessdata ??= _extractFromUrlParams(d['url']?.toString() ?? '');
+    final cookies = resp.headers.map['set-cookie'];
+    String? sessdata = _extractFromSetCookie('SESSDATA', cookies) ??
+        _extractFromUrlParam('SESSDATA', d['url']?.toString() ?? '');
+    final jct = _extractFromSetCookie('bili_jct', cookies) ??
+        _extractFromUrlParam('bili_jct', d['url']?.toString() ?? '');
     if (sessdata == null || sessdata.isEmpty) {
       throw Exception('登录成功但未能提取 SESSDATA');
     }
-    await setSessdata(sessdata);
+    await _saveCredentials(
+      sessdata: sessdata,
+      jct: jct,
+      refreshToken: d['refresh_token']?.toString(),
+    );
     return BiliQrPollState(code: code, message: '登录成功', loggedIn: true);
   }
 
-  String? _extractFromSetCookie(List<String>? cookies) {
+  String? _extractFromSetCookie(String name, List<String>? cookies) {
     if (cookies == null) return null;
+    final prefix = '$name=';
     for (final c in cookies) {
-      // SESSDATA 值可能包含逗号，以分号截断
-      if (c.trimLeft().startsWith('SESSDATA=')) {
-        final v = c.trimLeft().substring('SESSDATA='.length);
+      if (c.trimLeft().startsWith(prefix)) {
+        final v = c.trimLeft().substring(prefix.length);
         final end = v.indexOf(';');
         return end == -1 ? v : v.substring(0, end);
       }
@@ -161,25 +210,124 @@ class BilibiliService {
     return null;
   }
 
-  String? _extractFromUrlParams(String url) {
+  String? _extractFromUrlParam(String name, String url) {
     if (url.isEmpty) return null;
-    final idx = url.indexOf('SESSDATA=');
+    final idx = url.indexOf('$name=');
     if (idx == -1) return null;
-    final rest = url.substring(idx + 'SESSDATA='.length);
+    final rest = url.substring(idx + name.length + 1);
     final end = rest.indexOf('&');
     final raw = end == -1 ? rest : rest.substring(0, end);
     return Uri.decodeComponent(raw);
   }
 
+  // ============ Cookie 自动续期 ============
+
+  /// 检查并自动续期登录态（B站官方 Web cookie 刷新流程）。
+  /// 仅当 B站返回 refresh=true（即将到期）时才真正刷新；任何失败都静默忽略。
+  /// 返回 true 表示本次完成了刷新。
+  Future<bool> refreshCookieIfNeeded() async {
+    try {
+      if (!await hasLogin()) return false;
+      final jct = await _getJct();
+      final refreshToken = await _getRefreshToken();
+      if (jct == null || jct.isEmpty || refreshToken == null || refreshToken.isEmpty) {
+        return false; // 手动粘贴 SESSDATA 的用户没有续期材料，只能重新扫码
+      }
+
+      // 1. 检查是否需要刷新
+      final infoResp = await _dio.get(
+        'https://passport.bilibili.com/x/passport-login/web/cookie/info',
+        queryParameters: {'csrf': jct},
+        options: Options(headers: await _headers()),
+      );
+      final info = infoResp.data;
+      if (info is! Map || info['code'] != 0) return false;
+      final infoData = info['data'] as Map<String, dynamic>?;
+      if (infoData == null || infoData['refresh'] != true) return false;
+      final timestamp = (infoData['timestamp'] as num).toInt();
+
+      // 2. 生成 correspondPath：RSA-OAEP(SHA-256) 加密 refresh_{timestamp} 转 hex
+      final correspondPath = _generateCorrespondPath(timestamp);
+
+      // 3. 用 correspondPath 换取实时刷新口令 refresh_csrf（SSR HTML 中）
+      final csrfResp = await _dio.get(
+        'https://www.bilibili.com/correspond/1/$correspondPath',
+        options: Options(headers: await _headers()),
+      );
+      final csrfMatch =
+          RegExp(r'<div id="1-name">([^<]+)</div>').firstMatch(csrfResp.data.toString());
+      if (csrfMatch == null) return false;
+      final refreshCsrf = csrfMatch.group(1)!;
+
+      // 4. 刷新：旧 csrf + 旧 refresh_token -> 新 SESSDATA/bili_jct + 新 refresh_token
+      final refreshResp = await _dio.post(
+        'https://passport.bilibili.com/x/passport-login/web/cookie/refresh',
+        data: 'csrf=$jct&refresh_csrf=$refreshCsrf&source=main_web&refresh_token=$refreshToken',
+        options: Options(
+          headers: await _headers(),
+          contentType: Headers.formUrlEncodedContentType,
+        ),
+      );
+      final refresh = refreshResp.data;
+      if (refresh is! Map || refresh['code'] != 0) return false;
+
+      final setCookies = refreshResp.headers.map['set-cookie'];
+      final newSessdata = _extractFromSetCookie('SESSDATA', setCookies);
+      final newJct = _extractFromSetCookie('bili_jct', setCookies);
+      final newRefreshToken =
+          ((refresh['data'] as Map<String, dynamic>?)?['refresh_token'] ?? '').toString();
+      if (newSessdata == null || newSessdata.isEmpty) return false;
+      await _saveCredentials(
+        sessdata: newSessdata,
+        jct: newJct,
+        refreshToken: newRefreshToken.isEmpty ? null : newRefreshToken,
+      );
+
+      // 5. 确认更新：让旧 refresh_token 对应的凭据失效（官方要求，防滥用）
+      await _dio.post(
+        'https://passport.bilibili.com/x/passport-login/web/confirm/refresh',
+        data: 'csrf=${newJct ?? ''}&refresh_token=$refreshToken',
+        options: Options(
+          headers: await _headers(),
+          contentType: Headers.formUrlEncodedContentType,
+        ),
+      );
+      return true;
+    } catch (_) {
+      return false; // 静默失败，继续使用旧登录态
+    }
+  }
+
+  /// B站固定公钥 RSA-OAEP(SHA-256, MGF1-SHA256) 加密 refresh_{timestamp}，密文转小写hex
+  String _generateCorrespondPath(int timestamp) {
+    final pub = RSAPublicKey(_bigIntFromBase64Url(_refreshPubKeyN), BigInt.from(65537));
+    final cipher = OAEPEncoding.withSHA256(RSAEngine());
+    cipher.init(true, PublicKeyParameter<RSAPublicKey>(pub));
+    final plain = Uint8List.fromList(utf8.encode('refresh_$timestamp'));
+    final encrypted = cipher.process(plain);
+    return encrypted.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  BigInt _bigIntFromBase64Url(String s) {
+    var padded = s.replaceAll('-', '+').replaceAll('_', '/');
+    final mod = padded.length % 4;
+    if (mod != 0) padded += '=' * (4 - mod);
+    final bytes = base64.decode(padded);
+    return BigInt.parse(
+        bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
+        radix: 16);
+  }
+
   // ============ 登录态验证 ============
 
-  /// 校验登录态是否有效（调用 nav 接口）
+  /// 校验登录态是否有效（调用 nav 接口），顺带做一次自动续期
   Future<BiliLoginStatus> verifyLogin() async {
     final sess = await getSessdata();
     if (sess == null || sess.isEmpty) {
       return BiliLoginStatus(isLogin: false, uname: '', message: '未配置登录态');
     }
     try {
+      await refreshCookieIfNeeded();
       final resp = await _dio.get(
         'https://api.bilibili.com/x/web-interface/nav',
         options: Options(headers: await _headers()),
@@ -233,6 +381,8 @@ class BilibiliService {
   /// 主流程：链接/BV号 -> 视频信息 -> 字幕列表 -> 字幕JSON -> 入库
   /// 优先取 AI 字幕(ai-zh)，其次 CC 字幕(zh-CN)，再次任意可用字幕
   Future<BiliSubtitleResult> fetchVideoSubtitles(String urlOrBvid) async {
+    // 拉取前静默续期登录态（登录态即将到期时自动换新，用户无感）
+    await refreshCookieIfNeeded();
     final bvid = await extractBvid(urlOrBvid);
     if (bvid == null) {
       throw Exception('未能从输入中识别出 B站视频 BV 号');
