@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'openai_service.dart';
 import 'content_extractor.dart';
+import 'feedback_service.dart';
 import '../data/models/question.dart';
 
 /// 分析结果
@@ -26,6 +27,16 @@ class ContentAnalyzer {
 4. 题目难度适中，能检验对内容的理解
 5. 每道题都要有详细的解析说明
 6. 若提供了PDF/Word原文件或多张截图，请综合所有材料的信息
+
+## 出题原则（非常重要，必须严格遵守）：
+1. 只考察「知识点」本身：事实、概念、定义、数字、人物、事件、步骤、方法、结论等客观可记忆的内容
+2. 题干可以引用作者的观点作为素材来考察其承载的知识点（如「作者的观点是XX」作为题干出现），但所考察的仍是观点内容对应的知识，而不是观点本身的表达
+3. 严禁考察上下文逻辑、行文结构、写作手法、情感态度类内容，例如不得出以下类型的题：
+   - 「下列哪项符合原文的论证逻辑」「作者的论证思路是什么」
+   - 「作者在这段话中的情感倾向是什么」「下列哪项体现了作者的情感」
+   - 「这句话在文中的作用/含义是什么」「本段的行文结构是什么」
+4. 每道题的知识点必须能独立理解、独立作答，不依赖对上下文的推理或对全文感情的把握
+5. 判断题/选择题的正确答案必须能在材料中找到明确依据；材料没有的信息不得作为考点
 
 ## 题型格式说明：
 
@@ -122,8 +133,18 @@ class ContentAnalyzer {
     if (imageBase64 != null) allImages.add(imageBase64);
     if (imageBase64List != null) allImages.addAll(imageBase64List);
 
+    // 注入由用户反馈提炼出的改进规则（提示词自我优化闭环）
+    String systemPrompt = _systemPrompt;
+    final rules = await FeedbackService.getPromptRules();
+    if (rules.isNotEmpty) {
+      systemPrompt += '\n\n## 历史反馈改进规则（根据用户反馈提炼，必须遵守）：\n';
+      for (final r in rules) {
+        systemPrompt += '- $r\n';
+      }
+    }
+
     final response = await _openai.chatCompletion(
-      systemPrompt: _systemPrompt,
+      systemPrompt: systemPrompt,
       userContent: userContent.toString(),
       imageBase64List: allImages.isEmpty ? null : allImages,
       files: files,

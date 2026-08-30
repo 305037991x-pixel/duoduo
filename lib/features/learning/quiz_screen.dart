@@ -266,6 +266,131 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
     }
   }
 
+  /// 反馈「这题不行」：原因+备注入库，供AI后台提炼并优化出题提示词
+  void _showFeedbackSheet(Question question) {
+    const reasons = [
+      '题目内容有误',
+      '答案有误',
+      '解析有误',
+      '表述含糊/有歧义',
+      '考了上下文逻辑或感情',
+      '超出材料范围',
+      '重复/无意义',
+      '其他',
+    ];
+    String? reason;
+    final commentController = TextEditingController();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(sheetContext).viewInsets.bottom),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    const Icon(Icons.flag, color: AppColors.gold, size: 20),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('这道题哪里不行？', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20, color: AppColors.textSecondary),
+                      onPressed: () => Navigator.pop(sheetContext),
+                    ),
+                  ]),
+                  Text(
+                    question.content,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: reasons.map((r) {
+                      final isSelected = reason == r;
+                      return GestureDetector(
+                        onTap: () => setSheetState(() => reason = r),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isSelected ? AppColors.green : AppColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: isSelected ? AppColors.green : AppColors.border, width: 1.5),
+                          ),
+                          child: Text(
+                            r,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: isSelected ? Colors.white : AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: commentController,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText: '补充说明（可选），如：答案和解析对不上 / 这题考的是原文感情不是知识点',
+                      hintStyle: const TextStyle(fontSize: 13, color: AppColors.textLight),
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DuoButton(
+                    label: '提交反馈',
+                    color: AppColors.green,
+                    width: double.infinity,
+                    height: 48,
+                    icon: Icons.send,
+                    enabled: reason != null,
+                    onPressed: () async {
+                      final selectedReason = reason!;
+                      final comment = commentController.text.trim();
+                      Navigator.pop(sheetContext);
+                      try {
+                        await ref.read(feedbackServiceProvider).submit(
+                              question: question,
+                              reason: selectedReason,
+                              comment: comment,
+                            );
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已记录反馈，AI会据此优化出题提示词'), backgroundColor: AppColors.green),
+                          );
+                        }
+                      } catch (_) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('反馈保存失败，请重试'), backgroundColor: AppColors.red),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -313,22 +438,39 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 题型标签
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        question.type.label,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textSecondary,
+                    // 题型标签 + 反馈入口
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          question.type.label,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textSecondary,
+                          ),
                         ),
                       ),
-                    ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: () => _showFeedbackSheet(question),
+                        icon: Icon(
+                          Icons.flag_outlined,
+                          size: 16,
+                          color: AppColors.textSecondary,
+                        ),
+                        label: const Text('反馈', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ]),
                     const SizedBox(height: 16),
                     // 题干
                     Text(

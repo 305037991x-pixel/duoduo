@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/providers/providers.dart';
+import '../../services/bilibili_service.dart';
+import '../../services/feedback_service.dart';
 import '../../services/openai_service.dart';
 import '../../shared/widgets/duo_button.dart';
 
@@ -24,6 +26,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
 
+  // B站登录态
+  final _sessdataController = TextEditingController();
+  BiliLoginStatus? _biliStatus;
+  bool _biliChecking = false;
+
+  // 题目反馈
+  int _pendingFeedbackCount = 0;
+  List<String> _promptRules = [];
+  bool _isOptimizing = false;
+
   // 连通测试状态
   bool _isTesting = false;
   String? _testSuccess;
@@ -43,11 +55,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final providerId = await openai.getProviderId();
     final stats = await ref.read(gamificationServiceProvider).getStats();
 
+    // B站登录态 + 反馈数据
+    final bili = ref.read(bilibiliServiceProvider);
+    final sessdata = await bili.getSessdata();
+    final feedback = ref.read(feedbackServiceProvider);
+    final pendingCount = await feedback.countPending();
+    final rules = await FeedbackService.getPromptRules();
+
     setState(() {
       _apiKeyController.text = key ?? '';
       _baseUrlController.text = baseUrl;
       _selectedProviderId = providerId;
       _dailyGoal = stats.dailyGoal;
+      _sessdataController.text = sessdata ?? '';
+      _pendingFeedbackCount = pendingCount;
+      _promptRules = rules;
 
       // 检查模型是否在当前厂商的预设列表中
       final provider = AIProviders.getById(providerId);
@@ -162,7 +184,122 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _apiKeyController.dispose();
     _baseUrlController.dispose();
     _customModelController.dispose();
+    _sessdataController.dispose();
     super.dispose();
+  }
+
+  /// 保存并校验B站登录态（调用 nav 接口验证 SESSDATA 是否有效）
+  Future<void> _saveAndVerifyBilibili() async {
+    setState(() => _biliChecking = true);
+    final bili = ref.read(bilibiliServiceProvider);
+    await bili.setSessdata(_sessdataController.text.trim());
+    final status = await bili.verifyLogin();
+    setState(() {
+      _biliStatus = status;
+      _biliChecking = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(status.isLogin ? 'B站登录态有效：${status.uname}' : 'B站登录态无效：${status.message}'),
+        backgroundColor: status.isLogin ? AppColors.green : AppColors.red,
+      ));
+    }
+  }
+
+  /// 手动触发：AI 根据反馈提炼出题改进规则
+  Future<void> _optimizePromptManually() async {
+    setState(() => _isOptimizing = true);
+    final feedback = ref.read(feedbackServiceProvider);
+    final result = await feedback.optimizePrompt(
+      ref.read(openaiServiceProvider),
+      force: true,
+    );
+    final rules = await FeedbackService.getPromptRules();
+    final pending = await feedback.countPending();
+    setState(() {
+      _isOptimizing = false;
+      _promptRules = rules;
+      _pendingFeedbackCount = pending;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result == null ? '没有可提炼的反馈，或提炼失败，请稍后再试' : '已提炼出 ${rules.length} 条出题改进规则，将注入后续出题'),
+        backgroundColor: result == null ? AppColors.red : AppColors.green,
+      ));
+    }
+  }
+
+  Future<void> _clearFeedback() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清空反馈记录'),
+        content: const Text('将删除所有题目反馈记录（已提炼的改进规则会保留）。'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.red),
+            child: const Text('确定清空'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await ref.read(feedbackServiceProvider).clearAll();
+      setState(() => _pendingFeedbackCount = 0);
+    }
+  }
+
+  /// 查看反馈记录与当前规则
+  Future<void> _showFeedbackDetail() async {
+    final feedback = ref.read(feedbackServiceProvider);
+    final all = await feedback.getAll(limit: 30);
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Text('反馈记录（最近30条）', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            if (all.isEmpty) const Text('暂无反馈记录', style: TextStyle(color: AppColors.textSecondary)),
+            ...all.map((f) => Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10)),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Text(f.reason, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      const Spacer(),
+                      Text(f.status == 'pending' ? '待提炼' : '已提炼',
+                          style: TextStyle(fontSize: 11, color: f.status == 'pending' ? AppColors.red : AppColors.green)),
+                    ]),
+                    if (f.comment != null && f.comment!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text('备注：${f.comment}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                  ]),
+                )),
+            const SizedBox(height: 12),
+            const Text('当前出题改进规则（已注入出题提示词）', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            if (_promptRules.isEmpty) const Text('暂无规则，积累反馈后点击「AI提炼改进规则」生成', style: TextStyle(color: AppColors.textSecondary)),
+            ..._promptRules.map((r) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('· ', style: TextStyle(fontWeight: FontWeight.w800)),
+                    Expanded(child: Text(r, style: const TextStyle(fontSize: 13, height: 1.4))),
+                  ]),
+                )),
+          ],
+        ),
+      ),
+    );
   }
 
   AIProviderPreset get _currentProvider =>
@@ -511,6 +648,175 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                         );
                       }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // === B站账号（AI字幕登录态） ===
+              const Text(
+                'B站账号（AI字幕）',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border, width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SESSDATA（B站登录凭证）',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: _sessdataController,
+                      obscureText: true,
+                      decoration: InputDecoration(
+                        hintText: '粘贴浏览器 Cookie 中的 SESSDATA 值',
+                        hintStyle: TextStyle(color: AppColors.textLight),
+                        filled: true,
+                        fillColor: AppColors.surface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        prefixIcon: Icon(Icons.smart_display, color: Color(0xFFFB7299)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    GestureDetector(
+                      onTap: () => showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('如何获取 SESSDATA？'),
+                          content: const SingleChildScrollView(
+                            child: Text(
+                              '1. 在浏览器打开 bilibili.com 并登录\n'
+                              '2. 按 F12（或右键→检查）打开开发者工具\n'
+                              '3. 切换到 Application（应用）→ Cookies → https://www.bilibili.com\n'
+                              '4. 找到名为 SESSDATA 的条目，复制它的值\n'
+                              '5. 粘贴到上方输入框，点「保存并验证」\n\n'
+                              '手机浏览器可用「查看Cookie」类工具获取。\n'
+                              'AI字幕接口必须携带登录态才能返回，SESSDATA 只保存在你的手机本地。',
+                              style: TextStyle(fontSize: 14, height: 1.6),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('知道了', style: TextStyle(fontWeight: FontWeight.w700)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      child: const Text(
+                        '如何获取 SESSDATA？（点击查看步骤）',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFFD6336C),
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                    if (_biliStatus != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _biliStatus!.message,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _biliStatus!.isLogin ? AppColors.green : AppColors.red,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    DuoButton(
+                      label: _biliChecking ? '验证中...' : '保存并验证',
+                      color: const Color(0xFFFB7299),
+                      width: double.infinity,
+                      height: 44,
+                      icon: Icons.verified,
+                      fontSize: 14,
+                      onPressed: _biliChecking ? null : _saveAndVerifyBilibili,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // === 题目反馈优化 ===
+              const Text(
+                '题目反馈优化',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border, width: 2),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '你在答题页反馈的「不行的题目」会记录在本地；'
+                      '积累 5 条后 AI 会自动把反馈提炼成出题改进规则并注入后续出题（也可手动触发）。',
+                      style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Text(
+                        '待提炼反馈：$_pendingFeedbackCount 条',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: _showFeedbackDetail,
+                        icon: const Icon(Icons.list, size: 18),
+                        label: const Text('查看记录'),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    DuoButton(
+                      label: _isOptimizing ? 'AI 提炼中...' : 'AI 提炼改进规则',
+                      color: AppColors.blue,
+                      width: double.infinity,
+                      height: 44,
+                      icon: Icons.auto_fix_high,
+                      fontSize: 14,
+                      onPressed: _isOptimizing ? null : _optimizePromptManually,
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _clearFeedback,
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text('清空反馈记录'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.red,
+                        side: const BorderSide(color: AppColors.red, width: 1.5),
+                        minimumSize: const Size(double.infinity, 44),
+                      ),
                     ),
                   ],
                 ),

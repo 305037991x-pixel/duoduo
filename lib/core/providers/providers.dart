@@ -5,7 +5,9 @@ import '../../data/models/deck.dart';
 import '../../data/models/question.dart';
 import '../../data/models/study_record.dart';
 import '../../data/models/user_stats.dart';
+import '../../services/bilibili_service.dart';
 import '../../services/content_analyzer.dart';
+import '../../services/feedback_service.dart';
 import '../../services/gamification_service.dart';
 import '../../services/openai_service.dart';
 
@@ -21,6 +23,14 @@ final openaiServiceProvider = Provider<OpenAIService>((ref) {
 
 final contentAnalyzerProvider = Provider<ContentAnalyzer>((ref) {
   return ContentAnalyzer(ref.read(openaiServiceProvider));
+});
+
+final bilibiliServiceProvider = Provider<BilibiliService>((ref) {
+  return BilibiliService(ref.read(databaseProvider));
+});
+
+final feedbackServiceProvider = Provider<FeedbackService>((ref) {
+  return FeedbackService(ref.read(databaseProvider), ref.read(openaiServiceProvider));
 });
 
 final gamificationServiceProvider = Provider<GamificationService>((ref) {

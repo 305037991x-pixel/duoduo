@@ -24,8 +24,9 @@ class DatabaseHelper {
     final path = join(dbPath, 'dlg_q.db');
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -86,17 +87,55 @@ class DatabaseHelper {
       )
     ''');
 
-    // 初始化用户统计
-    await db.insert('user_stats', {
-      'id': 1,
-      'xp': 0,
-      'streak': 0,
-      'hearts': 5,
-      'max_hearts': 5,
-      'last_study_date': DateTime.now().millisecondsSinceEpoch,
-      'daily_goal': 50,
-      'today_xp': 0,
-    });
+  // 初始化用户统计
+  await db.insert('user_stats', {
+    'id': 1,
+    'xp': 0,
+    'streak': 0,
+    'hearts': 5,
+    'max_hearts': 5,
+    'last_study_date': DateTime.now().millisecondsSinceEpoch,
+    'daily_goal': 50,
+    'today_xp': 0,
+  });
+}
+
+  /// 版本迁移
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // B站字幕表
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS subtitles (
+          id TEXT PRIMARY KEY,
+          bvid TEXT NOT NULL,
+          cid INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          up_name TEXT,
+          page INTEGER DEFAULT 1,
+          lang TEXT,
+          lang_doc TEXT,
+          line_count INTEGER DEFAULT 0,
+          content TEXT NOT NULL,
+          lines_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
+
+      // 题目反馈表（用于AI后台提炼并优化出题提示词）
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS question_feedback (
+          id TEXT PRIMARY KEY,
+          question_id TEXT NOT NULL,
+          deck_id TEXT,
+          reason TEXT NOT NULL,
+          comment TEXT,
+          question_snapshot TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at INTEGER NOT NULL
+        )
+      ''');
+    }
   }
 
   // ============ Deck 操作 ============

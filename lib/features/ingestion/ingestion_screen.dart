@@ -41,6 +41,14 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
   // 链接抓取结果
   String? _linkExtractedText;
   bool _linkLoading = false;
+  String? _linkResultUrl; // 产生抓取结果的链接，用于判断结果是否仍有效
+  // B站字幕
+  bool _biliLoading = false;
+  String? _biliInfo; // 已获取字幕的描述信息
+
+  /// 当前有效的链接抓取文本（链接被编辑后旧结果作废）
+  String? get _effectiveLinkText =>
+      _linkController.text.trim() == _linkResultUrl ? _linkExtractedText : null;
 
   String? _sharedImagePath;
   String? _sharedImageBase64;
@@ -193,6 +201,48 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
     }
   }
 
+  /// 是否为B站视频链接（含短链 b23.tv）
+  bool _isBilibiliUrl() {
+    final url = _linkController.text.trim();
+    return url.contains('bilibili.com/video/') || url.contains('b23.tv');
+  }
+
+  /// 获取B站AI字幕（需要登录态，见设置页），字幕自动入库并作为出题素材
+  Future<void> _fetchBiliSubtitle() async {
+    final url = _linkController.text.trim();
+    if (url.isEmpty) {
+      setState(() => _errorMessage = '请输入B站视频链接');
+      return;
+    }
+    final bili = ref.read(bilibiliServiceProvider);
+    setState(() {
+      _biliLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      if (!await bili.hasLogin()) {
+        throw Exception('尚未配置B站登录态：请到「设置 → B站账号」粘贴 SESSDATA（AI字幕必须登录后才能获取）');
+      }
+      final r = await bili.fetchVideoSubtitles(url);
+      setState(() {
+        _biliLoading = false;
+        _linkResultUrl = url;
+        _linkExtractedText = '【B站视频】${r.title}（UP主：${r.upName}，${r.langDoc}，共${r.lines.length}句）\n\n${r.text}';
+        _biliInfo = '${r.title} · ${r.langDoc} · ${r.lines.length}句字幕（已存入字幕库）';
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('AI字幕获取成功（${r.lines.length}句），已保存，可直接出题'), backgroundColor: AppColors.green),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _biliLoading = false;
+        _errorMessage = '字幕获取失败: ${e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '')}';
+      });
+    }
+  }
+
   Future<void> _fetchLink() async {
     final url = _linkController.text.trim();
     if (url.isEmpty) {
@@ -203,6 +253,11 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
       setState(() => _errorMessage = '请输入以 http 开头的完整链接');
       return;
     }
+    // B站链接走字幕专用流程
+    if (_isBilibiliUrl()) {
+      await _fetchBiliSubtitle();
+      return;
+    }
     setState(() {
       _linkLoading = true;
       _errorMessage = null;
@@ -210,6 +265,7 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
     try {
       final r = await _extractor.extractFromUrl(url);
       setState(() {
+        _linkResultUrl = url;
         _linkExtractedText = r.text;
         _linkLoading = false;
       });
@@ -227,8 +283,9 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
   Future<void> _analyze() async {
     String text = _textController.text.trim();
     // 链接Tab的文本优先用抓取结果
-    if (_tabIndex == 3 && _linkExtractedText != null && _linkExtractedText!.isNotEmpty) {
-      text = _linkExtractedText!;
+    final linkText = _effectiveLinkText;
+    if (_tabIndex == 3 && linkText != null && linkText.isNotEmpty) {
+      text = linkText;
       if (_linkController.text.trim().isNotEmpty) {
         text = '${_linkController.text.trim()}\n\n$text';
       }
@@ -520,23 +577,28 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
   }
 
   Widget _buildLinkTab() {
+    final isBili = _isBilibiliUrl();
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(color: AppColors.blueLight, borderRadius: BorderRadius.circular(12)),
-          child: const Row(children: [
-            Icon(Icons.language, color: AppColors.blue, size: 20),
-            SizedBox(width: 8),
-            Expanded(child: Text('粘贴文章链接，自动抓取正文（JS重型站建议用系统分享）', style: TextStyle(fontSize: 13, color: AppColors.blueDark, fontWeight: FontWeight.w600))),
+          child: Row(children: [
+            const Icon(Icons.language, color: AppColors.blue, size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              isBili
+                  ? '已识别B站视频：自动获取AI字幕并入库，用字幕内容出题（需在设置中配置B站登录态）'
+                  : '粘贴文章链接，自动抓取正文；B站视频链接会自动获取AI字幕（JS重型站建议用系统分享）',
+              style: const TextStyle(fontSize: 13, color: AppColors.blueDark, fontWeight: FontWeight.w600))),
           ]),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: _linkController,
           decoration: InputDecoration(
-            hintText: 'https://...',
+            hintText: 'https://www.bilibili.com/video/BV... 或文章链接',
             prefixIcon: const Icon(Icons.link),
             filled: true,
             fillColor: AppColors.surface,
@@ -545,11 +607,62 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
                 ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
                 : null,
           ),
+          onChanged: (_) => setState(() {}),
           onSubmitted: (_) => _fetchLink(),
         ),
         const SizedBox(height: 12),
-        SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: _linkLoading ? null : _fetchLink, icon: const Icon(Icons.download), label: Text(_linkLoading ? '抓取中...' : '抓取正文'))),
-        if (_linkExtractedText != null) ...[
+        if (isBili) ...[
+          // B站专用：AI字幕卡片
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF0F4),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFFB7299), width: 1.5),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Row(children: [
+                Icon(Icons.smart_display, color: Color(0xFFFB7299), size: 20),
+                SizedBox(width: 8),
+                Text('B站视频 · AI字幕出题', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFFD6336C))),
+              ]),
+              const SizedBox(height: 6),
+              const Text('将拉取视频的AI字幕（自动生成）作为素材出题，字幕会存入本地字幕库，不考UP主的语气和上下文逻辑，只考知识点。',
+                  style: TextStyle(fontSize: 12, height: 1.5, color: AppColors.textSecondary)),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _biliLoading ? null : _fetchBiliSubtitle,
+                  icon: _biliLoading
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.subtitles, size: 18),
+                  label: Text(_biliLoading ? '正在获取AI字幕...' : '获取AI字幕'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFB7299),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          if (_biliInfo != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.greenLight, borderRadius: BorderRadius.circular(12)),
+              child: Row(children: [
+                const Icon(Icons.check_circle, color: AppColors.green, size: 18),
+                const SizedBox(width: 6),
+                Expanded(child: Text(_biliInfo!, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.greenDark))),
+              ]),
+            ),
+          ],
+        ] else ...[
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(onPressed: _linkLoading ? null : _fetchLink, icon: const Icon(Icons.download), label: Text(_linkLoading ? '抓取中...' : '抓取正文'))),
+        ],
+        if (_effectiveLinkText != null) ...[
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(12),
@@ -558,11 +671,11 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
               Row(children: [
                 const Icon(Icons.check_circle, color: AppColors.green, size: 18),
                 const SizedBox(width: 6),
-                Text('已提取 ${_linkExtractedText!.length} 字', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.greenDark)),
+                Text('已提取 ${_effectiveLinkText!.length} 字', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.greenDark)),
               ]),
               const SizedBox(height: 8),
-              Text(_linkExtractedText!.substring(0, _linkExtractedText!.length.clamp(0, 400)), style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary)),
-              if (_linkExtractedText!.length > 400) const Text('...', style: TextStyle(color: AppColors.textSecondary)),
+              Text(_effectiveLinkText!.substring(0, _effectiveLinkText!.length.clamp(0, 400)), style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textPrimary)),
+              if (_effectiveLinkText!.length > 400) const Text('...', style: TextStyle(color: AppColors.textSecondary)),
             ]),
           ),
         ],
