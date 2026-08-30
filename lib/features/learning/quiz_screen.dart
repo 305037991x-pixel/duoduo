@@ -154,7 +154,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
         return answer.trim().toLowerCase() == question.answer.trim().toLowerCase();
       case QuestionType.matching:
       case QuestionType.ordering:
-        final normalize = (String s) => s.split('|').map((e) => e.trim()).join('|');
+        normalize(String s) => s.split('|').map((e) => e.trim()).join('|');
         return normalize(answer) == normalize(question.answer);
       case QuestionType.essay:
         return false; // 问答题走AI判分，不进本地
@@ -458,7 +458,7 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                       const Spacer(),
                       TextButton.icon(
                         onPressed: () => _showFeedbackSheet(question),
-                        icon: Icon(
+                        icon: const Icon(
                           Icons.flag_outlined,
                           size: 16,
                           color: AppColors.textSecondary,
@@ -631,9 +631,9 @@ class _QuizScreenState extends ConsumerState<QuizScreen> {
                     ),
                   ),
                   if (isCorrect)
-                    Text(
+                    const Text(
                       '+10 XP',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: AppColors.gold,

@@ -429,7 +429,7 @@ class HomeScreen extends ConsumerWidget {
 
       nodes.add(
         Align(
-          alignment: Alignment(0, 0) + Alignment(offset, 0),
+          alignment: const Alignment(0, 0) + Alignment(offset, 0),
           widthFactor: 0.55,
           child: _PathNode(
             deck: deck,
@@ -453,7 +453,7 @@ class HomeScreen extends ConsumerWidget {
       if (i < decks.length - 1) {
         nodes.add(
           Align(
-            alignment: Alignment(0, 0) + Alignment(offset, 0),
+            alignment: const Alignment(0, 0) + Alignment(offset, 0),
             widthFactor: 0.55,
             child: Container(
               width: 4,

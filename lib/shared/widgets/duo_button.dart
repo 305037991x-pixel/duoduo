@@ -93,10 +93,10 @@ class _DuoButtonState extends State<DuoButton> {
 
   Color _darken(Color color) {
     return Color.fromARGB(
-      color.alpha,
-      (color.red * 0.8).round(),
-      (color.green * 0.8).round(),
-      (color.blue * 0.8).round(),
+      (color.a * 255.0).round(),
+      (color.r * 0.8 * 255.0).round(),
+      (color.g * 0.8 * 255.0).round(),
+      (color.b * 0.8 * 255.0).round(),
     );
   }
 }

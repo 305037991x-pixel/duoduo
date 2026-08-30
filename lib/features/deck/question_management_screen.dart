@@ -29,13 +29,13 @@ class QuestionManagementScreen extends ConsumerWidget {
         child: questionsAsync.when(
           data: (questions) {
             if (questions.isEmpty) {
-              return Center(
+              return const Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.quiz_outlined, size: 64, color: AppColors.textLight),
-                    const SizedBox(height: 16),
-                    const Text(
+                    SizedBox(height: 16),
+                    Text(
                       '暂无题目',
                       style: TextStyle(
                         fontSize: 18,

@@ -119,7 +119,7 @@ class QuizProgressBar extends StatelessWidget {
           // 心数
           Row(
             children: [
-              Icon(Icons.favorite, color: AppColors.heartRed, size: 22),
+              const Icon(Icons.favorite, color: AppColors.heartRed, size: 22),
               const SizedBox(width: 4),
               Text(
                 hearts.toString(),

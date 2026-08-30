@@ -3,7 +3,6 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../data/models/question.dart';
 import '../../../data/models/question_type.dart';
-import '../../../shared/widgets/duo_button.dart';
 
 /// 选择题 Widget
 class MultipleChoiceWidget extends StatefulWidget {
@@ -689,7 +688,7 @@ class _OrderingWidgetState extends State<OrderingWidget> {
                 Expanded(
                   child: Text(
                     item,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
                       color: AppColors.textPrimary,

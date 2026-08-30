@@ -199,11 +199,11 @@ class ProfileScreen extends ConsumerWidget {
           ),
           if (isComplete) ...[
             const SizedBox(height: 8),
-            Row(
+            const Row(
               children: [
-                const Icon(Icons.emoji_events, color: AppColors.gold, size: 20),
-                const SizedBox(width: 4),
-                const Text(
+                Icon(Icons.emoji_events, color: AppColors.gold, size: 20),
+                SizedBox(width: 4),
+                Text(
                   '今日目标已达成！',
                   style: TextStyle(
                     fontSize: 14,

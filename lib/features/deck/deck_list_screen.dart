@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/providers/providers.dart';
 import '../../data/models/deck.dart';
-import '../../shared/widgets/stats_widgets.dart';
 import '../learning/quiz_screen.dart';
 import '../ingestion/ingestion_screen.dart';
 import 'question_management_screen.dart';
@@ -109,13 +108,13 @@ class _DeckListScreenState extends ConsumerState<DeckListScreen> {
   }
 
   Widget _buildEmptyState(BuildContext context) {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.quiz_outlined, size: 64, color: AppColors.textLight),
-          const SizedBox(height: 16),
-          const Text(
+          SizedBox(height: 16),
+          Text(
             '还没有题包',
             style: TextStyle(
               fontSize: 18,
@@ -123,8 +122,8 @@ class _DeckListScreenState extends ConsumerState<DeckListScreen> {
               color: AppColors.textSecondary,
             ),
           ),
-          const SizedBox(height: 8),
-          const Text(
+          SizedBox(height: 8),
+          Text(
             '点击右下角 + 添加内容',
             style: TextStyle(color: AppColors.textLight),
           ),

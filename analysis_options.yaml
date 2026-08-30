@@ -9,6 +9,12 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # third_party 内是带本地补丁的 vendored 插件（file_picker 等），
+  # 其 example 子包未经根工程 pub get，参与分析会误报 uri_does_not_exist
+  exclude:
+    - third_party/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

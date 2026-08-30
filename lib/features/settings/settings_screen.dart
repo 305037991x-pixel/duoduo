@@ -705,13 +705,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       onPressed: _biliChecking ? null : _qrLogin,
                     ),
                     const SizedBox(height: 12),
-                    Row(children: [
-                      const Expanded(child: Divider(color: AppColors.border)),
-                      const Padding(
+                    const Row(children: [
+                      Expanded(child: Divider(color: AppColors.border)),
+                      Padding(
                         padding: EdgeInsets.symmetric(horizontal: 10),
                         child: Text('或手动粘贴', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                       ),
-                      const Expanded(child: Divider(color: AppColors.border)),
+                      Expanded(child: Divider(color: AppColors.border)),
                     ]),
                     const SizedBox(height: 12),
                     const Text(
@@ -728,14 +728,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       obscureText: true,
                       decoration: InputDecoration(
                         hintText: '粘贴浏览器 Cookie 中的 SESSDATA 值',
-                        hintStyle: TextStyle(color: AppColors.textLight),
+                        hintStyle: const TextStyle(color: AppColors.textLight),
                         filled: true,
                         fillColor: AppColors.surface,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                           borderSide: BorderSide.none,
                         ),
-                        prefixIcon: Icon(Icons.smart_display, color: Color(0xFFFB7299)),
+                        prefixIcon: const Icon(Icons.smart_display, color: Color(0xFFFB7299)),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -821,10 +821,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       '你在答题页反馈的「不行的题目」会记录在本地；'
                       '积累 5 条后 AI 会自动把反馈提炼成出题改进规则并注入后续出题（也可手动触发）。',
-                      style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary),
+                      style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 12),
                     Row(children: [
@@ -890,7 +890,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 icon: Icons.delete_forever,
                 title: '清除所有数据',
                 color: AppColors.red,
-                onTap: () => _showClearDataDialog(context),
+                onTap: _showClearDataDialog,
               ),
             ],
           ),
@@ -899,7 +899,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  Future<void> _showClearDataDialog(BuildContext context) async {
+  Future<void> _showClearDataDialog() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -920,7 +920,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       ),
     );
 
-    if (confirmed == true && context.mounted) {
+    if (confirmed == true && mounted) {
       final db = ref.read(databaseProvider);
       final decks = await db.getAllDecks();
       for (final deck in decks) {
