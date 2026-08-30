@@ -104,8 +104,13 @@ flutter build apk --release
 
 ## 下载
 
-前往 [Releases](https://github.com/xuanli199/duoduo/releases) 页面下载最新 APK。
+前往 [Releases](https://github.com/305037991x-pixel/duoduo/releases) 页面下载最新 APK。
 
 ## License
 
 MIT
+
+## B站字幕接入文档
+
+B站扫码登录、登录态自动续期、AI字幕获取的完整技术方案（可复用到其他项目）：
+见 [docs/bilibili-login-auth-and-subtitle.md](docs/bilibili-login-auth-and-subtitle.md)。
