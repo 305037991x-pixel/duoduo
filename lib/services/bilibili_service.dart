@@ -1,26 +1,37 @@
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import '../data/database/database_helper.dart';
 
-/// 一行字幕（含时间戳）
-class BiliSubtitleLine {
-  final double from;
-  final double to;
-  final String content;
-  BiliSubtitleLine({required this.from, required this.to, required this.content});
-
-  Map<String, dynamic> toMap() => {'from': from, 'to': to, 'content': content};
-
-  factory BiliSubtitleLine.fromMap(Map<String, dynamic> m) => BiliSubtitleLine(
-        from: (m['from'] as num?)?.toDouble() ?? 0,
-        to: (m['to'] as num?)?.toDouble() ?? 0,
-        content: (m['content'] ?? '').toString(),
-      );
+/// 登录验证结果
+class BiliLoginStatus {
+  final bool isLogin;
+  final String uname;
+  final String message;
+  BiliLoginStatus({required this.isLogin, required this.uname, required this.message});
 }
 
-/// 字幕获取结果
+/// 扫码登录二维码
+class BiliQrCode {
+  final String qrcodeKey;
+  final String qrUrl; // 二维码内容（用于生成二维码图片）
+  BiliQrCode({required this.qrcodeKey, required this.qrUrl});
+}
+
+/// 扫码登录轮询状态
+class BiliQrPollState {
+  static const int success = 0;
+  static const int expired = 86038;
+  static const int scannedNotConfirmed = 86090;
+  static const int notScanned = 86101;
+
+  final int code;
+  final String message;
+  final bool loggedIn;
+  BiliQrPollState({required this.code, required this.message, required this.loggedIn});
+}
+
+/// 字幕获取结果（只保留纯文本，不含时间轴）
 class BiliSubtitleResult {
   final String bvid;
   final int cid;
@@ -29,7 +40,7 @@ class BiliSubtitleResult {
   final String upName;
   final String lang; // ai-zh / zh-CN 等
   final String langDoc; // "中文（自动生成）" 等
-  final List<BiliSubtitleLine> lines;
+  final List<String> lines; // 每句字幕文本
   final String text; // 合并后的纯文本
 
   BiliSubtitleResult({
@@ -45,18 +56,14 @@ class BiliSubtitleResult {
   });
 }
 
-/// 登录验证结果
-class BiliLoginStatus {
-  final bool isLogin;
-  final String uname;
-  final String message;
-  BiliLoginStatus({required this.isLogin, required this.uname, required this.message});
-}
-
-/// B站服务 - 登录态(SESSDATA) + 视频信息 + AI字幕获取与入库
+/// B站服务 - 登录态(扫码/SESSDATA) + 视频信息 + AI字幕获取与入库
 ///
-/// 登录态获取方式：用户在浏览器登录 bilibili.com 后，从 Cookie 中复制
-/// SESSDATA 的值粘贴到设置页。B站的 AI 字幕接口必须携带 SESSDATA 才能返回。
+/// 登录态两种获取方式：
+/// 1. 扫码登录（推荐）：passport 的 qrcode generate/poll 接口，用户用B站APP
+///    扫一扫确认后，poll 响应的 Set-Cookie 里直接返回 SESSDATA，无需 WebView
+/// 2. 手动粘贴：浏览器登录 bilibili.com 后从 Cookie 复制 SESSDATA 到设置页
+///
+/// B站的 AI 字幕接口必须携带 SESSDATA 才能返回。
 class BilibiliService {
   static const String _sessdataKey = 'bili_sessdata';
 
@@ -98,11 +105,79 @@ class BilibiliService {
     return s != null && s.isNotEmpty;
   }
 
+  // ============ 扫码登录 ============
+
+  /// 创建扫码登录二维码
+  Future<BiliQrCode> createQrLogin() async {
+    final resp = await _dio.get(
+      'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
+      options: Options(headers: await _headers(withCookie: false)),
+    );
+    final data = resp.data;
+    if (data['code'] != 0) {
+      throw Exception('创建二维码失败：${data['code']} ${data['message']}');
+    }
+    final d = data['data'] as Map<String, dynamic>;
+    return BiliQrCode(qrcodeKey: d['qrcode_key'].toString(), qrUrl: d['url'].toString());
+  }
+
+  /// 轮询扫码状态。登录成功时 SESSDATA 在 Set-Cookie 响应头中（data.url 参数里也有一份），自动保存。
+  Future<BiliQrPollState> pollQrLogin(String qrcodeKey) async {
+    final resp = await _dio.get(
+      'https://passport.bilibili.com/x/passport-login/web/qrcode/poll',
+      queryParameters: {'qrcode_key': qrcodeKey},
+      options: Options(headers: await _headers(withCookie: false)),
+    );
+    final data = resp.data;
+    if (data['code'] != 0) {
+      throw Exception('轮询失败：${data['code']} ${data['message']}');
+    }
+    final d = data['data'] as Map<String, dynamic>;
+    final code = (d['code'] as num?)?.toInt() ?? -1;
+    if (code != BiliQrPollState.success) {
+      return BiliQrPollState(code: code, message: d['message'].toString(), loggedIn: false);
+    }
+
+    // 登录成功：优先从 Set-Cookie 头提取，其次从 data.url 的查询参数提取
+    String? sessdata = _extractFromSetCookie(resp.headers.map['set-cookie']);
+    sessdata ??= _extractFromUrlParams(d['url']?.toString() ?? '');
+    if (sessdata == null || sessdata.isEmpty) {
+      throw Exception('登录成功但未能提取 SESSDATA');
+    }
+    await setSessdata(sessdata);
+    return BiliQrPollState(code: code, message: '登录成功', loggedIn: true);
+  }
+
+  String? _extractFromSetCookie(List<String>? cookies) {
+    if (cookies == null) return null;
+    for (final c in cookies) {
+      // SESSDATA 值可能包含逗号，以分号截断
+      if (c.trimLeft().startsWith('SESSDATA=')) {
+        final v = c.trimLeft().substring('SESSDATA='.length);
+        final end = v.indexOf(';');
+        return end == -1 ? v : v.substring(0, end);
+      }
+    }
+    return null;
+  }
+
+  String? _extractFromUrlParams(String url) {
+    if (url.isEmpty) return null;
+    final idx = url.indexOf('SESSDATA=');
+    if (idx == -1) return null;
+    final rest = url.substring(idx + 'SESSDATA='.length);
+    final end = rest.indexOf('&');
+    final raw = end == -1 ? rest : rest.substring(0, end);
+    return Uri.decodeComponent(raw);
+  }
+
+  // ============ 登录态验证 ============
+
   /// 校验登录态是否有效（调用 nav 接口）
   Future<BiliLoginStatus> verifyLogin() async {
     final sess = await getSessdata();
     if (sess == null || sess.isEmpty) {
-      return BiliLoginStatus(isLogin: false, uname: '', message: '未配置 SESSDATA');
+      return BiliLoginStatus(isLogin: false, uname: '', message: '未配置登录态');
     }
     try {
       final resp = await _dio.get(
@@ -119,11 +194,13 @@ class BilibiliService {
           message: '登录有效：${d?['uname']}',
         );
       }
-      return BiliLoginStatus(isLogin: false, uname: '', message: 'SESSDATA 已失效，请重新复制');
+      return BiliLoginStatus(isLogin: false, uname: '', message: '登录态已失效，请重新扫码');
     } catch (e) {
       return BiliLoginStatus(isLogin: false, uname: '', message: '验证失败：$e');
     }
   }
+
+  // ============ 字幕 ============
 
   /// 从任意 B站链接/文本中提取 BV 号
   /// 支持 www.bilibili.com/video/BVxxx、b23.tv 短链、纯 BV 号
@@ -182,7 +259,7 @@ class BilibiliService {
     final subtitles = await _subtitleList(bvid, cid, aid: info['aid'] as num?);
     if (subtitles.isEmpty) {
       throw Exception(
-        '未找到可用字幕：该视频可能没有AI字幕/CC字幕，或登录态失效（AI字幕需要有效的 SESSDATA）',
+        '未找到可用字幕：该视频可能没有AI字幕/CC字幕，或登录态失效（AI字幕需要有效的登录态）',
       );
     }
 
@@ -203,12 +280,12 @@ class BilibiliService {
       }
     }
 
-    // 3. 下载字幕 JSON
+    // 3. 下载字幕 JSON（只取 content 文本，不要时间轴）
     String subtitleUrl = (chosen['subtitle_url'] ?? chosen['subtile_url'] ?? '').toString();
     if (subtitleUrl.isEmpty) throw Exception('字幕列表存在但字幕地址为空');
     if (subtitleUrl.startsWith('//')) subtitleUrl = 'https:$subtitleUrl';
 
-    final lines = <BiliSubtitleLine>[];
+    final lines = <String>[];
     try {
       final resp = await _dio.get(
         subtitleUrl,
@@ -218,8 +295,8 @@ class BilibiliService {
       if (body != null) {
         for (final item in body) {
           if (item is Map) {
-            final line = BiliSubtitleLine.fromMap(Map<String, dynamic>.from(item));
-            if (line.content.trim().isNotEmpty) lines.add(line);
+            final content = (item['content'] ?? '').toString().trim();
+            if (content.isNotEmpty) lines.add(content);
           }
         }
       }
@@ -229,7 +306,6 @@ class BilibiliService {
 
     if (lines.isEmpty) throw Exception('字幕内容为空');
 
-    final text = lines.map((l) => l.content).join('\n');
     final result = BiliSubtitleResult(
       bvid: bvid,
       cid: cid,
@@ -239,7 +315,7 @@ class BilibiliService {
       lang: (chosen['lan'] ?? '').toString(),
       langDoc: (chosen['lan_doc'] ?? '').toString(),
       lines: lines,
-      text: text,
+      text: lines.join('\n'),
     );
 
     // 4. 入库（字幕持久化，同一视频分P覆盖更新）
@@ -305,7 +381,6 @@ class BilibiliService {
       'lang_doc': r.langDoc,
       'line_count': r.lines.length,
       'content': r.text,
-      'lines_json': jsonEncode(r.lines.map((l) => l.toMap()).toList()),
       'created_at': now,
       'updated_at': now,
     };

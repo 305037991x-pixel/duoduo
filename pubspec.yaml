@@ -24,6 +24,8 @@ dependencies:
   image_picker: ^1.1.2
   http: ^1.2.0
   mime: ^2.0.0
+  # B站扫码登录二维码渲染（纯Dart，全平台可用）
+  qr_flutter: ^4.1.0
   # Web/桌面端 SQLite（Android 仍用原生 sqflite）
   sqflite_common_ffi: ^2.3.3
   sqflite_common_ffi_web: ^1.0.0

@@ -6,6 +6,7 @@ import '../../services/bilibili_service.dart';
 import '../../services/feedback_service.dart';
 import '../../services/openai_service.dart';
 import '../../shared/widgets/duo_button.dart';
+import 'qr_login_dialog.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -186,6 +187,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _customModelController.dispose();
     _sessdataController.dispose();
     super.dispose();
+  }
+
+  /// 扫码登录：弹二维码，B站APP扫码确认后自动保存 SESSDATA
+  Future<void> _qrLogin() async {
+    final ok = await QrLoginDialog.show(context);
+    if (!ok || !mounted) return;
+    setState(() => _biliChecking = true);
+    final bili = ref.read(bilibiliServiceProvider);
+    final status = await bili.verifyLogin();
+    setState(() {
+      _biliStatus = status;
+      _biliChecking = false;
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(status.isLogin ? 'B站登录成功：${status.uname}' : '登录态验证失败：${status.message}'),
+        backgroundColor: status.isLogin ? AppColors.green : AppColors.red,
+      ));
+    }
   }
 
   /// 保存并校验B站登录态（调用 nav 接口验证 SESSDATA 是否有效）
@@ -674,6 +694,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 扫码登录（推荐，全自动）
+                    DuoButton(
+                      label: _biliChecking ? '验证中...' : 'B站APP扫码登录（推荐）',
+                      color: const Color(0xFFFB7299),
+                      width: double.infinity,
+                      height: 48,
+                      icon: Icons.qr_code_scanner,
+                      fontSize: 15,
+                      onPressed: _biliChecking ? null : _qrLogin,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      const Expanded(child: Divider(color: AppColors.border)),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('或手动粘贴', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                      const Expanded(child: Divider(color: AppColors.border)),
+                    ]),
+                    const SizedBox(height: 12),
                     const Text(
                       'SESSDATA（B站登录凭证）',
                       style: TextStyle(
@@ -706,13 +746,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           title: const Text('如何获取 SESSDATA？'),
                           content: const SingleChildScrollView(
                             child: Text(
+                              '方式一（推荐）：点击上方「B站APP扫码登录」，'
+                              '用B站APP扫一扫并确认，登录态自动保存，无需手动操作。\n\n'
+                              '方式二：手动粘贴 SESSDATA\n'
                               '1. 在浏览器打开 bilibili.com 并登录\n'
                               '2. 按 F12（或右键→检查）打开开发者工具\n'
                               '3. 切换到 Application（应用）→ Cookies → https://www.bilibili.com\n'
                               '4. 找到名为 SESSDATA 的条目，复制它的值\n'
                               '5. 粘贴到上方输入框，点「保存并验证」\n\n'
-                              '手机浏览器可用「查看Cookie」类工具获取。\n'
-                              'AI字幕接口必须携带登录态才能返回，SESSDATA 只保存在你的手机本地。',
+                              'AI字幕接口必须携带登录态才能返回，登录凭证只保存在你的手机本地。',
                               style: TextStyle(fontSize: 14, height: 1.6),
                             ),
                           ),

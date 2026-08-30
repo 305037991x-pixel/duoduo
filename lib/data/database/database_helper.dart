@@ -103,7 +103,7 @@ class DatabaseHelper {
   /// 版本迁移
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // B站字幕表
+      // B站字幕表（只存纯文本，不存时间轴）
       await db.execute('''
         CREATE TABLE IF NOT EXISTS subtitles (
           id TEXT PRIMARY KEY,
@@ -116,7 +116,6 @@ class DatabaseHelper {
           lang_doc TEXT,
           line_count INTEGER DEFAULT 0,
           content TEXT NOT NULL,
-          lines_json TEXT,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         )
