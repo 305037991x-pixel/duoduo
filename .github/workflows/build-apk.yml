@@ -1,0 +1,40 @@
+name: Build APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Create Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0-multimodal-${{ github.run_number }}
+          name: "多多多模态版 v1.0-${{ github.run_number }}"
+          body: |
+            多模态纯云端版
+            - 截图/拍照多选、PDF/Word原文件直传(MiMo-V2.5)
+            - 链接抓取
+            - 问答题 AI对错+点评
+            安装 app-release.apk 即可
+          files: build/app/outputs/flutter-apk/app-release.apk
