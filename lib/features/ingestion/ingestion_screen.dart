@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/providers/providers.dart';
 import '../../services/content_extractor.dart';
@@ -48,6 +49,18 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
   String? _errorMessage;
   int _tabIndex = 0;
 
+  /// 出题量：文字/截图/文件/链接 四种类型各自独立，持久化到 SharedPreferences
+  static const String _qCountPrefPrefix = 'ingestion_question_count_';
+  static const int _defaultQuestionCount = 10;
+  static const int _minQuestionCount = 3;
+  static const int _maxQuestionCount = 30;
+  List<int> _questionCounts = const [
+    _defaultQuestionCount,
+    _defaultQuestionCount,
+    _defaultQuestionCount,
+    _defaultQuestionCount,
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +69,7 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
       if (_tabController.indexIsChanging) return;
       setState(() => _tabIndex = _tabController.index);
     });
+    _loadQuestionCounts();
     if (widget.sharedText != null && widget.sharedText!.isNotEmpty) {
       _textController.text = widget.sharedText!;
     }
@@ -63,6 +77,31 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
       _sharedImagePath = widget.sharedImagePath;
       _loadSharedImage();
     }
+  }
+
+  Future<void> _loadQuestionCounts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final counts = [
+        for (int i = 0; i < 4; i++)
+          prefs.getInt('$_qCountPrefPrefix$i') ?? _defaultQuestionCount,
+      ];
+      setState(() => _questionCounts = counts);
+    } catch (_) {}
+  }
+
+  Future<void> _setQuestionCount(int value) async {
+    final clamped = value.clamp(_minQuestionCount, _maxQuestionCount);
+    if (clamped == _questionCounts[_tabIndex]) return;
+    setState(() {
+      final counts = List<int>.from(_questionCounts);
+      counts[_tabIndex] = clamped;
+      _questionCounts = counts;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('$_qCountPrefPrefix$_tabIndex', clamped);
+    } catch (_) {}
   }
 
   Future<void> _loadSharedImage() async {
@@ -118,7 +157,7 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
 
   Future<void> _pickFiles() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         allowMultiple: true,
         withData: true,
         type: FileType.custom,
@@ -227,6 +266,7 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
         text: text,
         imageBase64List: allImages.isEmpty ? null : allImages,
         files: hasFiles ? _pickedFiles : null,
+        questionCount: _questionCounts[_tabIndex],
       );
 
       setState(() => _statusText = '正在生成题目...');
@@ -311,6 +351,34 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
               Expanded(child: Text(_errorMessage!, style: const TextStyle(color: AppColors.redDark, fontSize: 14))),
             ]),
           ),
+        // 出题量选择（随 tab 切换显示对应类型各自的题量）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(children: [
+              const Icon(Icons.quiz, color: AppColors.green, size: 20),
+              const SizedBox(width: 8),
+              const Text('出题量', style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              const Spacer(),
+              _buildCountStepperButton(Icons.remove, () => _setQuestionCount(_questionCounts[_tabIndex] - 1)),
+              SizedBox(
+                width: 64,
+                child: Text(
+                  '${_questionCounts[_tabIndex]} 道',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.textPrimary),
+                ),
+              ),
+              _buildCountStepperButton(Icons.add, () => _setQuestionCount(_questionCounts[_tabIndex] + 1)),
+            ]),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.all(16),
           child: DuoButton(
@@ -499,6 +567,18 @@ class _IngestionScreenState extends ConsumerState<IngestionScreen> with SingleTi
           ),
         ],
       ]),
+    );
+  }
+
+  Widget _buildCountStepperButton(IconData icon, VoidCallback onPressed) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: const BoxDecoration(color: AppColors.greenLight, shape: BoxShape.circle),
+        child: Icon(icon, color: AppColors.green, size: 20),
+      ),
     );
   }
 

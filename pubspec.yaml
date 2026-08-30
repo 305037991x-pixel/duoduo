@@ -20,10 +20,19 @@ dependencies:
   flutter_svg: ^2.0.10+1
   shared_preferences: ^2.3.2
   cached_network_image: ^3.4.1
-  file_picker: ^10.1.9
+  file_picker: ^11.0.0
   image_picker: ^1.1.2
   http: ^1.2.0
   mime: ^2.0.0
+  # Web/桌面端 SQLite（Android 仍用原生 sqflite）
+  sqflite_common_ffi: ^2.3.3
+  sqflite_common_ffi_web: ^1.0.0
+
+# 本地补丁版 file_picker：原版引用的 FlutterLifecycleAdapter 在 Flutter 3.32
+# 引擎中已移除导致编译失败，此处改为 ActivityPluginBinding.getLifecycle()。
+dependency_overrides:
+  file_picker:
+    path: third_party/file_picker
 
 dev_dependencies:
   flutter_test:

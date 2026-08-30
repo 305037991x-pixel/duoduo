@@ -82,7 +82,7 @@ class ContentAnalyzer {
 
 ## 注意事项：
 - title 要简洁有力，概括内容主题
-- 至少生成 5 道题，最多 10 道
+- 题目数量以用户消息中指定的「出题量」为准；未指定时生成 5-10 道
 - 尽量包含至少 3 种题型，可包含 1-2 道问答题
 - 解析要清楚说明为什么这个答案是对的
 - 如果内容是图片/文档，仔细识别其中的文字和图表信息
@@ -94,9 +94,11 @@ class ContentAnalyzer {
     String? imageBase64,
     List<String>? imageBase64List,
     List<ExtractedFile>? files,
+    int questionCount = 10,
   }) async {
     final userContent = StringBuffer();
     userContent.writeln('请分析以下内容并生成题目：');
+    userContent.writeln('出题量：请生成 $questionCount 道题。');
     userContent.writeln();
     if (text.isNotEmpty) {
       userContent.writeln('--- 文本/链接正文 ---');

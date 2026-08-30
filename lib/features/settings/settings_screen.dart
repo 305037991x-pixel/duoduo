@@ -24,6 +24,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
 
+  // 连通测试状态
+  bool _isTesting = false;
+  String? _testSuccess;
+  String? _testError;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +108,52 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           backgroundColor: AppColors.green,
         ),
       );
+    }
+  }
+
+  /// 连通测试：先保存当前表单配置（确保测试的就是正在编辑的配置），
+  /// 再用最小请求实际调用一次 AI 接口，展示模型回复与耗时。
+  Future<void> _testConnection() async {
+    setState(() {
+      _isTesting = true;
+      _testSuccess = null;
+      _testError = null;
+    });
+
+    final openai = ref.read(openaiServiceProvider);
+    await openai.setApiKey(_apiKeyController.text.trim());
+    await openai.setBaseUrl(_baseUrlController.text.trim());
+    await openai.setProviderId(_selectedProviderId);
+    await openai.setModel(
+      _useCustomModel ? _customModelController.text.trim() : _selectedModel,
+    );
+
+    final stopwatch = Stopwatch()..start();
+    try {
+      final reply = await openai.chatCompletion(
+        systemPrompt: '你是接口连通性测试助手',
+        userContent: '连通测试，请只回复：OK',
+        temperature: 0,
+      );
+      stopwatch.stop();
+      final seconds = (stopwatch.elapsedMilliseconds / 1000).toStringAsFixed(1);
+      final preview = reply.trim();
+      final replyPreview = preview.isEmpty
+          ? '(空回复)'
+          : preview.substring(0, preview.length.clamp(0, 60));
+      if (!mounted) return;
+      setState(() {
+        _testSuccess = '连接成功（${seconds}s）· 模型回复：$replyPreview';
+        _isTesting = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // 去掉 Dart 异常的 "Exception: " 前缀，直接展示可读信息
+      final message = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+      setState(() {
+        _testError = '连接失败：$message';
+        _isTesting = false;
+      });
     }
   }
 
@@ -344,6 +395,64 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 12),
+
+              // === 连通测试 ===
+              DuoButton(
+                label: _isTesting ? '测试中...' : '连通测试',
+                color: AppColors.blue,
+                width: double.infinity,
+                height: 48,
+                icon: Icons.network_check,
+                fontSize: 15,
+                onPressed: _isTesting ? null : _testConnection,
+              ),
+              if (_testSuccess != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.greenLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.check_circle, color: AppColors.green, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _testSuccess!,
+                          style: const TextStyle(fontSize: 13, color: AppColors.greenDark, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (_testError != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.redLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.error, color: AppColors.red, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _testError!,
+                          style: const TextStyle(fontSize: 13, color: AppColors.redDark, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
               // === 学习目标 ===

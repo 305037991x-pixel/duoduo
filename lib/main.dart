@@ -4,9 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/theme/app_theme.dart';
+import 'data/database/database_factory.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Web/桌面端需要先初始化 sqflite 数据库工厂，否则 openDatabase 会报
+  // "databaseFactory not initialized"。Android/iOS 原生无需处理。
+  await initDatabaseFactory();
 
   // 捕获 Flutter 框架渲染错误
   FlutterError.onError = (FlutterErrorDetails details) {
